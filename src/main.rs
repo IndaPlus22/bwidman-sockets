@@ -10,7 +10,7 @@ extern crate piston;
 
 use std::collections::HashMap;
 
-use chess_template::{Colour, Game, PieceType, Piece};
+use chess_template::{Colour, Game, PieceType, Piece, Position, GameState};
 
 use glutin_window::GlutinWindow as Window;
 use opengl_graphics::{GlGraphics, GlyphCache, OpenGL, Texture, TextureSettings};
@@ -60,13 +60,15 @@ impl App {
 
         let square = rectangle::square(0.0, 0.0, GRID_CELL_SIZE.0 as f64);
 
+        let board = self.game.get_board();
+        let mouse_pos = self.mouse_cell();
+
         self.gl.draw(args.viewport(), |c, gl| {
-            // // Clear the screen.
-            // clear(GREEN, gl);
-            // draw grid
+            // Clear the screen.
+            clear([0.3, 0.3, 0.3, 1.0], gl);
+            // Draw tiles
             for row in 0..8 {
                 for col in 0..8 {
-                    // Draw tile
                     rectangle(
                         match col % 2 {
                             0 => if row % 2 == 0 { BLACK } else { WHITE },
@@ -75,26 +77,46 @@ impl App {
                         square,
                         c.transform.trans(
                             (col * GRID_CELL_SIZE.0) as f64,
-                            (row * GRID_CELL_SIZE.0) as f64,
+                            (row * GRID_CELL_SIZE.1) as f64,
                         ),
                         gl,
                     );
+                }
+            }
 
-                    let board = self.game.get_board();
-
-                    // Draw piece
+            // Draw pieces
+            for row in 0..8 {
+                for col in 0..8 {
                     if let Some(piece) = board[(row * 8 + col) as usize] {
                         let img = Image::new().rect(square);
 
-                        let correct_cell_clicked: bool = (self.mouse_pos[0] / GRID_CELL_SIZE.0 as f64).floor() as i16 == col &&
-                        (self.mouse_pos[1] / GRID_CELL_SIZE.1 as f64).floor() as i16 == row;
+                        let correct_cell_clicked = mouse_pos == (col, row);
                         let piece_moving = self.moving_piece.is_some() && self.moving_piece.unwrap() == (col, row);
                         
-                        // Piece is being moved
-                        if self.left_click && correct_cell_clicked || piece_moving {
-                            // Follow mouse
+                        let cursor_not_on_other_piece = mouse_pos != (col, row);
+                        
+                        if (self.left_click && correct_cell_clicked) || // Piece got clicked on
+                        (piece_moving && cursor_not_on_other_piece) { // Piece is being moved
+                            self.left_click = false;
                             self.moving_piece = Some((col, row));
                             
+                            // Draw dots on possible moves
+                            let moves = self.game.get_possible_moves(Position::new(row as usize, col as usize).ok().unwrap(), 0);
+                            let circle_mask = rectangle::square(0.0, 0.0, 20.0);
+
+                            for position in moves {
+                                ellipse(
+                                    [0.5, 0.5, 0.5, 0.5],
+                                    rectangle::centered(circle_mask),
+                                    c.transform.trans(
+                                        (position.col as i16 * GRID_CELL_SIZE.0 + GRID_CELL_SIZE.0 / 2) as f64,
+                                        (position.row as i16 * GRID_CELL_SIZE.1 + GRID_CELL_SIZE.1 / 2) as f64
+                                    ),
+                                    gl
+                                );
+                            }
+                            
+                            // Follow mouse
                             img.draw(
                                 self.sprites.get(&piece).unwrap(),
                                 &c.draw_state,
@@ -104,9 +126,6 @@ impl App {
                                 ),
                                 gl,
                             );
-
-                            // Draw dots on possible moves
-
                         } else {
                             img.draw(
                                 self.sprites.get(&piece).unwrap(),
@@ -122,18 +141,38 @@ impl App {
                 }
             }
 
-            // Draw text
-            // We do some calculations to center the text
-            // Is not exactly in the middle, try to fix it if you want to!
+            // Write game state
             let state_text = format!("Game state: {:?}", self.game.get_game_state());
-            let text_size: (f32, f32) = ((24 * state_text.len()) as f32, 24f32);
-            let text_postition = c.transform.trans(
-                ((SCREEN_SIZE.0 - text_size.0) / 2f32) as f64,
-                (SCREEN_SIZE.1 - text_size.1) as f64,
+            let state_text_postition = c.transform.trans(
+                10.0,
+                (SCREEN_SIZE.1 - 10.0) as f64,
             );
-            text::Text::new(24)
-                .draw(&state_text, glyphs, &c.draw_state, text_postition, gl)
+            text::Text::new_color([1.0, 1.0, 1.0, 1.0], 24)
+                .draw(&state_text, glyphs, &c.draw_state, state_text_postition, gl)
                 .unwrap();
+            
+                // Write who's turn it is
+                let turn_text = format!("Turn: {:?}", self.game.get_active_colour());
+            let turn_text_postition = c.transform.trans(
+                (SCREEN_SIZE.0 - 160.0) as f64,
+                (SCREEN_SIZE.1 - 10.0) as f64,
+            );
+            text::Text::new_color([1.0, 1.0, 1.0, 1.0], 24)
+            .draw(&turn_text, glyphs, &c.draw_state, turn_text_postition, gl)
+            .unwrap();
+            
+            // Announce winner
+            if self.game.get_game_state() == GameState::GameOver {
+                let gameover_text = format!("{:?} is the winner!", self.game.get_active_colour());
+                let gameover_text_size: (f32, f32) = ((22 * gameover_text.len()) as f32, 36.0);
+                let gameover_text_postition = c.transform.trans(
+                    (SCREEN_SIZE.0 / 2.0 - gameover_text_size.0 / 2.0) as f64,
+                    (SCREEN_SIZE.1 / 2.0 - gameover_text_size.1 / 2.0) as f64,
+                );
+                text::Text::new_color([1.0, 1.0, 1.0, 1.0], 45)
+                    .draw(&gameover_text, glyphs, &c.draw_state, gameover_text_postition, gl)
+                    .unwrap();
+            }
         });
     }
 
@@ -167,7 +206,7 @@ impl App {
             .collect::<HashMap<Piece, Texture>>()
     }
 
-    /// Returns 
+    /// Returns which cell the mouse is in
     fn mouse_cell(&self) -> (i16, i16) {
         (
             (self.mouse_pos[0] / GRID_CELL_SIZE.0 as f64).floor() as i16, 
@@ -215,8 +254,16 @@ fn main() {
             app.left_click = true;
         }
         if let Some(Button::Mouse(MouseButton::Left)) = e.release_args() {
-            app.left_click = false;
-            app.moving_piece = None;
+            // If a piece is being moved
+            if let Some(pos) = app.moving_piece {
+                let mouse_pos = app.mouse_cell();
+                
+                let from = Position::new(pos.1 as usize, pos.0 as usize).ok().unwrap();
+                let to = Position::new(mouse_pos.1 as usize, mouse_pos.0 as usize).ok().unwrap();
+
+                app.game.make_move_pos(from, to);
+                app.moving_piece = None;
+            }
         }
     }
 }

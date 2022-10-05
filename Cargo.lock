@@ -126,7 +126,7 @@ dependencies = [
 [[package]]
 name = "chess_template"
 version = "0.1.0"
-source = "git+https://github.com/IndaPlus22/eskilny-task-3.git#abd89943b54f81154879de86df717701f7d2107c"
+source = "git+https://github.com/IndaPlus22/eskilny-task-3.git#03855714c1c79e7ca29429e6fe693d80baa7b810"
 
 [[package]]
 name = "cocoa"
