@@ -15,9 +15,9 @@ use chess_template::{Colour, Game, PieceType, Piece, Position, GameState};
 use glutin_window::GlutinWindow as Window;
 use opengl_graphics::{GlGraphics, GlyphCache, OpenGL, Texture, TextureSettings};
 use piston::event_loop::{EventSettings, Events};
-use piston::input::{RenderArgs, RenderEvent, UpdateArgs, UpdateEvent};
+use piston::input::{RenderArgs, RenderEvent};
 use piston::window::WindowSettings;
-use piston::{Button, MouseButton, MouseCursorEvent, PressEvent, ReleaseEvent};
+use piston::{Button, Key, MouseButton, MouseCursorEvent, PressEvent, ReleaseEvent, Window as pWindow};
 
 /// A chess board is 8x8 tiles.
 const GRID_SIZE: i16 = 8;
@@ -34,8 +34,9 @@ const SCREEN_SIZE: (f32, f32) = (
 const BLACK: [f32; 4] = [228.0 / 255.0, 196.0 / 255.0, 108.0 / 255.0, 1.0];
 const WHITE: [f32; 4] = [188.0 / 255.0, 140.0 / 255.0, 76.0 / 255.0, 1.0];
 
-pub struct App {
+pub struct App<'a> {
     gl: GlGraphics,                                 // OpenGL drawing backend.
+    window: &'a mut Window,
     mouse_pos: [f64; 2],                            // Current mouse postition
     left_click: bool,                               // Indicates if left mouse button is pressed
     moving_piece: Option<(i16, i16)>,               // Contains the coordinates of the piece being moved, None if none is being moved
@@ -43,10 +44,11 @@ pub struct App {
     game: Game, // Save piece positions, which tiles has been clicked, current colour, etc...
 }
 
-impl App {
-    fn new(opengl: OpenGL) -> App {
+impl App<'_> {
+    fn new(opengl: OpenGL, window: &mut Window) -> App {
         App {
             gl: GlGraphics::new(opengl),
+            window,
             mouse_pos: [0., 0.],
             left_click: false,
             moving_piece: None,
@@ -60,10 +62,10 @@ impl App {
 
         let square = rectangle::square(0.0, 0.0, GRID_CELL_SIZE.0 as f64);
 
-        let board = self.game.get_board();
         let mouse_pos = self.mouse_cell();
-
+        
         self.gl.draw(args.viewport(), |c, gl| {
+            let board = self.game.get_board();
             // Clear the screen.
             clear([0.3, 0.3, 0.3, 1.0], gl);
             // Draw tiles
@@ -151,33 +153,55 @@ impl App {
                 .draw(&state_text, glyphs, &c.draw_state, state_text_postition, gl)
                 .unwrap();
             
-                // Write who's turn it is
-                let turn_text = format!("Turn: {:?}", self.game.get_active_colour());
+            // Write who's turn it is
+            let turn_text = format!("Turn: {:?}", self.game.get_active_colour());
             let turn_text_postition = c.transform.trans(
                 (SCREEN_SIZE.0 - 160.0) as f64,
                 (SCREEN_SIZE.1 - 10.0) as f64,
             );
             text::Text::new_color([1.0, 1.0, 1.0, 1.0], 24)
-            .draw(&turn_text, glyphs, &c.draw_state, turn_text_postition, gl)
-            .unwrap();
+                .draw(&turn_text, glyphs, &c.draw_state, turn_text_postition, gl)
+                .unwrap();
+
+            let mut center_text = |text: &str, size: u32, dy: f32| {
+                let text_size: (f32, f32) = ((size / 2 * text.len() as u32) as f32, size as f32);
+                let text_postition = c.transform.trans(
+                    (SCREEN_SIZE.0 / 2.0 - text_size.0 / 2.0) as f64,
+                    (SCREEN_SIZE.1 / 2.0 - text_size.1 / 2.0 + dy) as f64,
+                );
+                text::Text::new_color([1.0, 1.0, 1.0, 1.0], size)
+                    .draw(text, glyphs, &c.draw_state, text_postition, gl)
+                    .unwrap();
+            };
             
             // Announce winner
             if self.game.get_game_state() == GameState::GameOver {
-                let gameover_text = format!("{:?} is the winner!", self.game.get_active_colour());
-                let gameover_text_size: (f32, f32) = ((22 * gameover_text.len()) as f32, 36.0);
-                let gameover_text_postition = c.transform.trans(
-                    (SCREEN_SIZE.0 / 2.0 - gameover_text_size.0 / 2.0) as f64,
-                    (SCREEN_SIZE.1 / 2.0 - gameover_text_size.1 / 2.0) as f64,
-                );
-                text::Text::new_color([1.0, 1.0, 1.0, 1.0], 45)
-                    .draw(&gameover_text, glyphs, &c.draw_state, gameover_text_postition, gl)
-                    .unwrap();
+                let text = format!("{:?} is the winner!", self.game.get_active_colour());
+                center_text(&text, 45, 0.0);
+            }
+
+            // Set promotion
+            if self.game.get_game_state() == GameState::WaitingOnPromotionChoice {
+                center_text("Promotion!", 30, -75.0);
+                center_text("Choose new piece with number keys:", 30, -45.0);
+                center_text("1. Queen", 30, -15.0);
+                center_text("2. Rook", 30, 15.0);
+                center_text("3. Bishop", 30, 45.0);
+                center_text("4. Knight", 30, 75.0);
+                
+                let choice: String;
+                if let Some(key) = self.window.wait_event().press_args() {
+                    choice = match key {
+                        Button::Keyboard(Key::D1) => String::from("queen"),
+                        Button::Keyboard(Key::D2) => String::from("rook"),
+                        Button::Keyboard(Key::D3) => String::from("bishop"),
+                        Button::Keyboard(Key::D4) => String::from("knight"),
+                        _ => String::from(""),
+                    };
+                    self.game.set_promotion(choice);
+                }
             }
         });
-    }
-
-    fn update(&mut self, args: &UpdateArgs) {
-        // Currently empty, but maybe you can find a fun use for it!
     }
 
     #[rustfmt::skip]
@@ -228,7 +252,7 @@ fn main() {
             .unwrap();
 
     // Initialize our app state
-    let mut app = App::new(opengl);
+    let mut app = App::new(opengl, &mut window);
 
     // Initialize font
     let mut glyphs = GlyphCache::new(
@@ -240,12 +264,9 @@ fn main() {
 
     let mut events = Events::new(EventSettings::new());
     // Our "game loop". Will run until we exit the window
-    while let Some(e) = events.next(&mut window) {
+    while let Some(e) = events.next(app.window) {
         if let Some(args) = e.render_args() {
             app.render(&args, &mut glyphs);
-        }
-        if let Some(args) = e.update_args() {
-            app.update(&args);
         }
         if let Some(pos) = e.mouse_cursor_args() {
             app.mouse_pos = pos;
@@ -261,7 +282,7 @@ fn main() {
                 let from = Position::new(pos.1 as usize, pos.0 as usize).ok().unwrap();
                 let to = Position::new(mouse_pos.1 as usize, mouse_pos.0 as usize).ok().unwrap();
 
-                app.game.make_move_pos(from, to);
+                let _result = app.game.make_move_pos(from, to);
                 app.moving_piece = None;
             }
         }
