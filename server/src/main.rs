@@ -1,6 +1,7 @@
 use std::{
     io::{prelude::*, BufReader},
-    net::{TcpListener, TcpStream}
+    net::{TcpListener, TcpStream},
+    thread
 };
 
 fn main() {
@@ -9,13 +10,14 @@ fn main() {
     for stream in listener.incoming() {
         let stream: TcpStream = stream.unwrap();
         let mut buf_reader = BufReader::new(stream);
-        
-        let mut buffer = [0u8; 1024];
-        buf_reader.read(&mut buffer).ok().unwrap();
-        let message = String::from_utf8(buffer.to_vec()).unwrap();
 
-        println!("{}", message);
+        thread::spawn(move || loop {
+            let mut buffer = vec![0u8; 64];
+            
+            buf_reader.read(&mut buffer).ok().unwrap();
+            let message = String::from_utf8(buffer).unwrap();
+    
+            println!("{}", message);
+        });
     }
-
-    println!("Hello, world!");
 }

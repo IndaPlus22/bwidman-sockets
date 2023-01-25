@@ -265,7 +265,9 @@ fn main() {
     .unwrap();
 
     let mut tcp_stream = TcpStream::connect("127.0.0.1:6969").unwrap();
-
+    // prevent io stream operation from blocking socket in case of slow communication
+    tcp_stream.set_nonblocking(true).expect("Failed to initiate non-blocking!");
+    
     let mut events = Events::new(EventSettings::new());
     // Our "game loop". Will run until we exit the window
     while let Some(e) = events.next(app.window) {
@@ -285,11 +287,13 @@ fn main() {
                 
                 let from = Position::new(pos.1 as usize, pos.0 as usize).ok().unwrap();
                 let to = Position::new(mouse_pos.1 as usize, mouse_pos.0 as usize).ok().unwrap();
-
+                
                 let _result = app.game.make_move_pos(from, to);
                 app.moving_piece = None;
-
-                tcp_stream.write_all(b"test test 1 2 3").unwrap();
+                
+                // Send move to server
+                let move_msg = format!("{} {}", from.idx, to.idx);
+                tcp_stream.write_all(move_msg.as_bytes()).unwrap();
                 tcp_stream.flush().unwrap();
             }
         }
