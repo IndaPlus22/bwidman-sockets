@@ -9,6 +9,8 @@ extern crate opengl_graphics;
 extern crate piston;
 
 use std::collections::HashMap;
+use std::io::Write;
+use std::net::TcpStream;
 
 use chess_template::{Colour, Game, PieceType, Piece, Position, GameState};
 
@@ -262,6 +264,8 @@ fn main() {
     )
     .unwrap();
 
+    let mut tcp_stream = TcpStream::connect("127.0.0.1:6969").unwrap();
+
     let mut events = Events::new(EventSettings::new());
     // Our "game loop". Will run until we exit the window
     while let Some(e) = events.next(app.window) {
@@ -284,6 +288,9 @@ fn main() {
 
                 let _result = app.game.make_move_pos(from, to);
                 app.moving_piece = None;
+
+                tcp_stream.write_all(b"test test 1 2 3").unwrap();
+                tcp_stream.flush().unwrap();
             }
         }
     }
