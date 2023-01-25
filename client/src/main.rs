@@ -9,8 +9,8 @@ extern crate opengl_graphics;
 extern crate piston;
 
 use std::collections::HashMap;
-use std::io::Write;
-use std::net::TcpStream;
+use std::io::{Write, Read};
+use std::net::{TcpStream, Shutdown};
 
 use chess_template::{Colour, Game, PieceType, Piece, Position, GameState};
 
@@ -200,7 +200,7 @@ impl App<'_> {
                         Button::Keyboard(Key::D4) => String::from("knight"),
                         _ => String::from(""),
                     };
-                    self.game.set_promotion(choice);
+                    self.game.set_promotion(choice).unwrap();
                 }
             }
         });
@@ -241,6 +241,16 @@ impl App<'_> {
     }
 }
 
+fn assign_color(tcp_stream: &mut TcpStream) -> Colour {
+    let mut buffer = vec![0u8; 16];
+    tcp_stream.read(&mut buffer).unwrap();
+
+    if String::from_utf8(buffer).unwrap() == "white" {
+        return Colour::White;
+    }
+    return Colour::Black;
+}
+
 fn main() {
     // Change this to OpenGL::V2_1 if not working.
     let opengl = OpenGL::V3_2;
@@ -267,6 +277,8 @@ fn main() {
     let mut tcp_stream = TcpStream::connect("127.0.0.1:6969").unwrap();
     // prevent io stream operation from blocking socket in case of slow communication
     tcp_stream.set_nonblocking(true).expect("Failed to initiate non-blocking!");
+
+    let color = assign_color(&mut tcp_stream);
     
     let mut events = Events::new(EventSettings::new());
     // Our "game loop". Will run until we exit the window
@@ -288,14 +300,34 @@ fn main() {
                 let from = Position::new(pos.1 as usize, pos.0 as usize).ok().unwrap();
                 let to = Position::new(mouse_pos.1 as usize, mouse_pos.0 as usize).ok().unwrap();
                 
-                let _result = app.game.make_move_pos(from, to);
+                let move_result = app.game.make_move_pos(from, to);
                 app.moving_piece = None;
                 
-                // Send move to server
-                let move_msg = format!("{} {}", from.idx, to.idx);
-                tcp_stream.write_all(move_msg.as_bytes()).unwrap();
-                tcp_stream.flush().unwrap();
+                // Move was legal, send it to server
+                if move_result.is_ok() {
+                    let move_msg = format!("{} {}", from.idx, to.idx);
+                    tcp_stream.write_all(move_msg.as_bytes()).unwrap();
+                    tcp_stream.flush().unwrap();
+                }
             }
         }
+
+        if app.game.get_active_colour() != color {
+            // Get update of other player from server
+            let mut buffer = vec![0u8; 5];
+            tcp_stream.read_exact(&mut buffer).unwrap();
+
+            // Convert read data into move indices
+            let moves = String::from_utf8(buffer).unwrap();
+            let mut moves_split = moves.split(" ");
+
+            let from = moves_split.next().unwrap().parse().unwrap();
+            let to = moves_split.next().unwrap().parse().unwrap();
+
+            // Make move for opponent on this client
+            app.game.make_move_pos(Position::new_from_idx(from).unwrap(), Position::new_from_idx(to).unwrap()).unwrap();
+        }
     }
+
+    tcp_stream.shutdown(Shutdown::Both).unwrap();
 }
