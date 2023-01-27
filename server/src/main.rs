@@ -5,7 +5,7 @@ use std::{
 
 fn handle_player(player: &mut TcpStream, opponent: &mut TcpStream) {
     // Fetch move made
-    let mut buffer = [0u8; 16];
+    let mut buffer = [0u8; 5];
     player.read(&mut buffer).unwrap();
     
     // Relay move to opponent
@@ -22,8 +22,10 @@ fn main() {
     let mut player1 = listener.accept().unwrap();
     player1.0.write_all(b"white").unwrap(); // Assign color
     player1.0.flush().unwrap();
+    println!("Player 1 connected");
 
     let mut player2 = listener.accept().unwrap();
+    println!("Player 2 connected");
     player2.0.write_all(b"black").unwrap(); // Assign color
     player2.0.flush().unwrap();
 

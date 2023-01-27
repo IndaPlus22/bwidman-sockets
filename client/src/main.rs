@@ -19,7 +19,7 @@ use opengl_graphics::{GlGraphics, GlyphCache, OpenGL, Texture, TextureSettings};
 use piston::event_loop::{EventSettings, Events};
 use piston::input::{RenderArgs, RenderEvent};
 use piston::window::WindowSettings;
-use piston::{Button, Key, MouseButton, MouseCursorEvent, PressEvent, ReleaseEvent, Window as pWindow};
+use piston::{Button, Key, MouseButton, MouseCursorEvent, PressEvent, ReleaseEvent, Window as pWindow, UpdateEvent};
 
 /// A chess board is 8x8 tiles.
 const GRID_SIZE: i16 = 8;
@@ -44,6 +44,7 @@ pub struct App<'a> {
     moving_piece: Option<(i16, i16)>,               // Contains the coordinates of the piece being moved, None if none is being moved
     sprites: HashMap<Piece, Texture>, // For easy access to the apropriate PNGs
     game: Game, // Save piece positions, which tiles has been clicked, current colour, etc...
+    color: Colour, // What color you are, as opposed to your opponent
 }
 
 impl App<'_> {
@@ -56,6 +57,7 @@ impl App<'_> {
             moving_piece: None,
             game: Game::new(),
             sprites: Self::load_sprites(),
+            color: Colour::White,
         }
     }
 
@@ -156,9 +158,14 @@ impl App<'_> {
                 .unwrap();
             
             // Write who's turn it is
-            let turn_text = format!("Turn: {:?}", self.game.get_active_colour());
+            let active_color = self.game.get_active_colour();
+            let turn_text: String = if active_color == self.color {
+                format!("Turn: {:?} (you)", active_color)
+            } else { 
+                format!("Turn: {:?}", active_color)
+            };
             let turn_text_postition = c.transform.trans(
-                (SCREEN_SIZE.0 - 160.0) as f64,
+                (SCREEN_SIZE.0 - 210.0) as f64,
                 (SCREEN_SIZE.1 - 10.0) as f64,
             );
             text::Text::new_color([1.0, 1.0, 1.0, 1.0], 24)
@@ -239,10 +246,27 @@ impl App<'_> {
             (self.mouse_pos[1] / GRID_CELL_SIZE.1 as f64).floor() as i16
         )
     }
+
+    fn make_opponent_move(&mut self, tcp_stream: &mut TcpStream) {
+        // Get update of other player from server
+        let mut buffer = vec![0u8; 5];
+        tcp_stream.read_exact(&mut buffer).unwrap();
+
+        // Convert read data into move indices
+        let moves = String::from_utf8(buffer).unwrap();
+        println!("Opponent move: {}", moves);
+        let mut moves_split = moves.split(" ");
+
+        let from = moves_split.next().unwrap().parse::<usize>().unwrap() - 10; // -10 to get original index (got +10 before sent)
+        let to = moves_split.next().unwrap().parse::<usize>().unwrap() - 10;
+
+        // Make move for opponent on this client
+        self.game.make_move_pos(Position::new_from_idx(from).unwrap(), Position::new_from_idx(to).unwrap()).unwrap();
+    }
 }
 
 fn assign_color(tcp_stream: &mut TcpStream) -> Colour {
-    let mut buffer = vec![0u8; 16];
+    let mut buffer = vec![0u8; 5];
     tcp_stream.read(&mut buffer).unwrap();
 
     if String::from_utf8(buffer).unwrap() == "white" {
@@ -275,16 +299,22 @@ fn main() {
     .unwrap();
 
     let mut tcp_stream = TcpStream::connect("127.0.0.1:6969").unwrap();
-    // prevent io stream operation from blocking socket in case of slow communication
-    tcp_stream.set_nonblocking(true).expect("Failed to initiate non-blocking!");
+    println!("Connected to server!");
 
-    let color = assign_color(&mut tcp_stream);
+    app.color = assign_color(&mut tcp_stream);
+    println!("You are: {:?}", app.color);
     
     let mut events = Events::new(EventSettings::new());
     // Our "game loop". Will run until we exit the window
     while let Some(e) = events.next(app.window) {
         if let Some(args) = e.render_args() {
             app.render(&args, &mut glyphs);
+        }
+        if let Some(_e) = e.update_args() {
+            // Get opponent move and make the move on this client
+            if app.game.get_active_colour() != app.color {
+                app.make_opponent_move(&mut tcp_stream);
+            }
         }
         if let Some(pos) = e.mouse_cursor_args() {
             app.mouse_pos = pos;
@@ -305,27 +335,12 @@ fn main() {
                 
                 // Move was legal, send it to server
                 if move_result.is_ok() {
-                    let move_msg = format!("{} {}", from.idx, to.idx);
+                    let move_msg = format!("{} {}", from.idx + 10, to.idx + 10); // +10 to avoid single digits
                     tcp_stream.write_all(move_msg.as_bytes()).unwrap();
                     tcp_stream.flush().unwrap();
+                    println!("Sent move: {}", move_msg);
                 }
             }
-        }
-
-        if app.game.get_active_colour() != color {
-            // Get update of other player from server
-            let mut buffer = vec![0u8; 5];
-            tcp_stream.read_exact(&mut buffer).unwrap();
-
-            // Convert read data into move indices
-            let moves = String::from_utf8(buffer).unwrap();
-            let mut moves_split = moves.split(" ");
-
-            let from = moves_split.next().unwrap().parse().unwrap();
-            let to = moves_split.next().unwrap().parse().unwrap();
-
-            // Make move for opponent on this client
-            app.game.make_move_pos(Position::new_from_idx(from).unwrap(), Position::new_from_idx(to).unwrap()).unwrap();
         }
     }
 
